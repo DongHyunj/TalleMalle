@@ -4,8 +4,8 @@
 .vscode/
 
 # 도커 및 데이터베이스 관련 (공통)
-db/
-docker/db/
+db/*
+!db/.gitkeep
 
 # OS 생성 파일
 .DS_Store

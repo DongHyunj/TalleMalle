@@ -36,8 +36,3 @@ coverage
 __screenshots__/
 
 .env
-.env.development
-.env.production
-
-nginx/*
-nginx

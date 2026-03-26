@@ -3,35 +3,49 @@ version: "3.8"
 services:
   db:
     image: mariadb:latest
+    restart: always
     ports:
       - "3306:3306"
     volumes:
-      - ../db:/var/lib/mysql
+      - db_data:/var/lib/mysql
     environment:
-      - MARIADB_ROOT_PASSWORD=qwer1234
-      - MARIADB_DATABASE=tallemalle
+      - MARIADB_ROOT_PASSWORD=${DB_ROOT_PASSWORD:-qwer1234}
+      - MARIADB_DATABASE=${DB_NAME:-tallemalle}
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ../backend
       dockerfile: Dockerfile
+    restart: always
     ports:
       - 8080:8080
     env_file:
       - ../backend/.env
     environment:
-      - DB_URL=jdbc:mariadb://db:3306/tallemalle
+      - DB_URL=jdbc:mariadb://db:3306/${DB_NAME:-tallemalle}
       - DB_USER=root
-      - DB_PASS=qwer1234
+      - DB_PASS=${DB_ROOT_PASSWORD:-qwer1234}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+
   frontend:
     build:
       context: ../frontend
       dockerfile: Dockerfile
       args:
-        - VITE_API_BASE_URL=http://localhost:8080
-        - VITE_WS_URL=ws://localhost:8080/ws
+        - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8080}
+        - VITE_WS_URL=${VITE_WS_URL:-ws://localhost:8080/ws}
+    restart: always
     ports:
       - "80:80"
     depends_on:
       - backend
+
+volumes:
+  db_data:

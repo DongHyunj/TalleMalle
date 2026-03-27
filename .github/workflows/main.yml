@@ -24,9 +24,10 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
       - name: Build with Docker
+        working-directory: ./backend
         run: |
           docker build -t deatytim/backend:latest .
-          docker push deatytim/backend:latest .
+          docker push deatytim/backend:latest
       - name : run ssh
         uses: appleboy/ssh-action@v1
         with:

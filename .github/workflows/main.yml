@@ -36,4 +36,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.PORT }}
           script: |
-            echo test > /tmp/test
+            sudo docker pull deatytim/backend:latest
+            sudo docker stop backend || true
+            sudo docker rm backend || true
+            sudo docker run -d -p 8080:8080 --name backend deatytim/backend:latest

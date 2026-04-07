@@ -186,9 +186,21 @@ const goToStep2 = async () => {
   step.value = 2
 }
 
+const generateUUID = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID()
+  }
+  // HTTP(non-secure context) 환경 폴리필
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
 const verifyIdentity = async () => {
   try {
-    const identityVerificationId = `identity-verification-${crypto.randomUUID()}`
+    const identityVerificationId = `identity-verification-${generateUUID()}`
     const portoneResponse = await PortOne.requestIdentityVerification({
       storeId: import.meta.env.VITE_PORTONE_STORE_ID,
       channelKey: import.meta.env.VITE_PORTONE_CHANNEL_KEY,

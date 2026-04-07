@@ -1,0 +1,123 @@
+pipeline {
+  agent {
+    kubernetes {
+      label "gradle-kaniko-${UUID.randomUUID().toString()}"
+      defaultContainer 'gradle'
+      yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  restartPolicy: Never
+  containers:
+    - name: gradle
+      image: eclipse-temurin:17-jdk-bullseye
+      command: ['cat']
+      tty: true
+    - name: kaniko
+      image: gcr.io/kaniko-project/executor:debug
+      command: ['/busybox/sh','-c','sleep infinity']
+      tty: true
+      volumeMounts:
+        - name: docker-config
+          mountPath: /kaniko/.docker
+        - name: workspace
+          mountPath: /workspace
+    - name: kubectl
+      image: bitnami/kubectl:latest
+      command: ['sleep', 'infinity']
+      tty: true
+      securityContext:
+        runAsUser: 0
+  volumes:
+    - name: workspace
+      emptyDir: {}
+    - name: docker-config
+      secret:
+        secretName: dockerhub-cred
+        items:
+          - key: .dockerconfigjson
+            path: config.json
+"""
+    }
+  }
+
+  environment {
+    IMAGE_NAME     = 'deatytim/tmbackend'
+    IMAGE_TAG      = "${env.BUILD_NUMBER}"
+    DEPLOY_NAME    = 'backend-deployment'
+    CONTAINER_NAME = 'backend'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        container('gradle') {
+          checkout scm
+        }
+      }
+    }
+
+    stage('Gradle Build') {
+      steps {
+        container('gradle') {
+          dir('backend') {
+            sh '''
+              chmod +x ./gradlew
+              ./gradlew clean bootJar --no-daemon
+            '''
+          }
+        }
+      }
+    }
+
+    stage('Kaniko Build & Push') {
+      steps {
+        container('kaniko') {
+          sh """
+            /kaniko/executor \
+              --context=${WORKSPACE}/backend \
+              --dockerfile=${WORKSPACE}/backend/Dockerfile \
+              --destination=${IMAGE_NAME}:${IMAGE_TAG} \
+              --destination=${IMAGE_NAME}:latest \
+              --single-snapshot \
+              --use-new-run \
+              --cache=true \
+              --snapshotMode=redo
+          """
+        }
+      }
+    }
+
+    stage('Deploy to Kubernetes') {
+      steps {
+        container('kubectl') {
+          sh """
+            kubectl set image deployment/${DEPLOY_NAME} \
+              ${CONTAINER_NAME}=${IMAGE_NAME}:${IMAGE_TAG}
+            kubectl rollout status deployment/${DEPLOY_NAME} --timeout=120s
+          """
+        }
+      }
+    }
+
+    stage('Rollback on Failure') {
+      when {
+        expression { currentBuild.result == 'FAILURE' }
+      }
+      steps {
+        container('kubectl') {
+          sh "kubectl rollout undo deployment/${DEPLOY_NAME}"
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "Backend 배포 완료: ${IMAGE_NAME}:${IMAGE_TAG}"
+    }
+    failure {
+      echo "Backend 배포 실패"
+    }
+  }
+}

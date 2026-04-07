@@ -1,0 +1,123 @@
+pipeline {
+  agent {
+    kubernetes {
+      label "node-kaniko-${UUID.randomUUID().toString()}"
+      defaultContainer 'node'
+      yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  restartPolicy: Never
+  containers:
+    - name: node
+      image: node:22.17.1-bullseye
+      command: ['cat']
+      tty: true
+    - name: kaniko
+      image: gcr.io/kaniko-project/executor:debug
+      command: ['/busybox/sh','-c','sleep infinity']
+      tty: true
+      volumeMounts:
+        - name: docker-config
+          mountPath: /kaniko/.docker
+        - name: workspace
+          mountPath: /workspace
+    - name: kubectl
+      image: bitnami/kubectl:latest
+      command: ['sleep', 'infinity']
+      tty: true
+      securityContext:
+        runAsUser: 0
+  volumes:
+    - name: workspace
+      emptyDir: {}
+    - name: docker-config
+      secret:
+        secretName: dockerhub-cred
+        items:
+          - key: .dockerconfigjson
+            path: config.json
+"""
+    }
+  }
+
+  environment {
+    IMAGE_NAME = 'deatytim/tmfront'
+    IMAGE_TAG  = "${env.BUILD_NUMBER}"
+    DEPLOY_NAME    = 'frontend-deployment'
+    CONTAINER_NAME = 'frontend'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        container('node') {
+          checkout scm
+        }
+      }
+    }
+
+    stage('npm Install & Build') {
+      steps {
+        container('node') {
+          dir('frontend') {
+            sh '''
+              npm install
+              npm run build
+            '''
+          }
+        }
+      }
+    }
+
+    stage('Kaniko Build & Push') {
+      steps {
+        container('kaniko') {
+          sh """
+            /kaniko/executor \
+              --context=${WORKSPACE}/frontend \
+              --dockerfile=${WORKSPACE}/frontend/Dockerfile \
+              --destination=${IMAGE_NAME}:${IMAGE_TAG} \
+              --destination=${IMAGE_NAME}:latest \
+              --single-snapshot \
+              --use-new-run \
+              --cache=true \
+              --snapshotMode=redo
+          """
+        }
+      }
+    }
+
+    stage('Deploy to Kubernetes') {
+      steps {
+        container('kubectl') {
+          sh """
+            kubectl set image deployment/${DEPLOY_NAME} \
+              ${CONTAINER_NAME}=${IMAGE_NAME}:${IMAGE_TAG}
+            kubectl rollout status deployment/${DEPLOY_NAME} --timeout=120s
+          """
+        }
+      }
+    }
+
+    stage('Rollback on Failure') {
+      when {
+        expression { currentBuild.result == 'FAILURE' }
+      }
+      steps {
+        container('kubectl') {
+          sh "kubectl rollout undo deployment/${DEPLOY_NAME}"
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "Frontend 배포 완료: ${IMAGE_NAME}:${IMAGE_TAG}"
+    }
+    failure {
+      echo "Frontend 배포 실패"
+    }
+  }
+}
